@@ -57,7 +57,7 @@ data Clause a
     | Clause
         { cl_name :: Maybe Int
         -- ^ Name for this clause to get unsatisfiable cores
-        , cl_type :: ClType
+        , cl_type :: ClType a
         -- ^ Axiom, conjecture...
         , ty_vars :: [a]
         -- ^ Top-level type variables
@@ -70,13 +70,22 @@ data Clause a
         }
   deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
 
-data ClType
+data ClType a
     = Axiom
-    -- ^ Axioms, or definitions, or hypothesis or negated conjectures
-    --   Is it important to distinguish between these?
+    -- ^ Axioms, hypotheses or negated conjectures
+    --   When instantiating, we only instatiate if all function applications
+    --   in it are triggered.
+    | Defines [a]
+    -- ^ Defines of one or many symbols
+    --   (i.e. they should trigger when instantiating a symbol at some type)
+    --   The list is typically just one function symbol, but for a data type
+    --   we put all the constructors and projections in there; think about:
+    --   forall (a : *). forall (xs : list a).
+    --      xs = nil(a) \/ xs = cons(a,cons_0(a,xs),cons_1(a,xs)),
+    --   this defines something for both nil, cons and cons_0 and cons_1.
     | Goal
     -- ^ Conjecture
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
 
 data Type a
     = TyCon a [Type a]

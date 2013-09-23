@@ -35,10 +35,11 @@ ppClause p cls = case cls of
 
     Comment s            -> hang "(*" 2 (vcat (map text (lines s)) <+> "*)")
 
-ppClType :: ClType -> Doc
+ppClType :: ClType a -> Doc
 ppClType cl = case cl of
-    Axiom -> "axiom"
-    Goal  -> "goal"
+    Axiom     -> "axiom"
+    Defines{} -> "axiom"
+    Goal      -> "goal"
 
 ppTySig :: Id a -> a -> [Type a] -> Type a -> Doc
 ppTySig p x args res

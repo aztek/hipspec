@@ -83,8 +83,15 @@ trDatatype (Datatype tc0 tvs0 dcs0) =
         | (dc,args) <- dcs
         ]
 
+    axiom = Defines $ concat
+                [ Id dc : [ Proj dc i
+                          | (i,_) <- zip [0..] args
+                          ]
+                | (dc,args) <- dcs
+                ]
+
     -- domain axiom
-    domain = Clause Nothing Axiom tvs $ forAll q0 tc_ty $ foldr1 (\/)
+    domain = Clause Nothing axiom tvs $ forAll q0 tc_ty $ foldr1 (\/)
         [ Var q0 === Apply (Id dc) tvs'
             [ Apply (Proj dc i) tvs' [Var q0]
             | (i,_) <- zip [0..] args
@@ -95,7 +102,7 @@ trDatatype (Datatype tc0 tvs0 dcs0) =
         q0 = QVar 0
 
     -- injectivity axioms
-    inj = map (Clause Nothing Axiom tvs) $ concat
+    inj = map (Clause Nothing axiom tvs) $ concat
         [ [ forAlls (zip (map QVar [0..]) args) $
                 Apply (Proj dc i) tvs' [tm] === Var (QVar i)
           | (i,_) <- zip [0..] args
@@ -106,7 +113,7 @@ trDatatype (Datatype tc0 tvs0 dcs0) =
 
 
     -- discrimination axioms
-    discrim = map (Clause Nothing Axiom tvs) $
+    discrim = map (Clause Nothing axiom tvs) $
         [ forAlls (qs_k ++ qs_j) (tm_k =/= tm_j)
         | ((k,args_k),(j,args_j)) <- diag dcs
         , let qs_k = zip (map QVar [0..]) args_k
@@ -119,10 +126,10 @@ trDatatype (Datatype tc0 tvs0 dcs0) =
     ptrs = [ (dc,ptrAxiom dc tvs args tc_ty) | (dc,args) <- dcs ]
 
 ptrAxiom :: v -> [Poly v] -> [P.Type (Poly v)] -> P.Type (Poly v) -> [Clause (Poly v)]
-ptrAxiom _ _ [] _ = []
+ptrAxiom _ _   []   _   = []
 ptrAxiom f tvs args res =
     [ TypeSig (Ptr f) tvs [] (foldr ty_fn res args)
-    , Clause Nothing Axiom tvs $
+    , Clause Nothing (Defines [Ptr f]) tvs $
         forAlls vars $
             mk_lhs args res ===
             Apply (Id f) (map P.TyVar tvs) (map (Var . fst) vars)
@@ -159,7 +166,7 @@ trFun (Function f tvs args res_ty body) = (def_cls,ptr_cls)
     res_ty'  = trType res_ty
 
     mk_def_cls = do
-        cls <- map (Clause Nothing Axiom tvs') <$> trBody body
+        cls <- map (Clause Nothing (Defines [Id f]) tvs') <$> trBody body
         let ty_cl = TypeSig f' tvs' args_ty' res_ty'
         return (ty_cl:cls)
 
