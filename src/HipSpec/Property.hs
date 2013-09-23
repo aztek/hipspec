@@ -8,6 +8,7 @@ module HipSpec.Property
     , mapLiteral
     , Property(..)
     , propEquation
+    , forgetQSEquation
     , isUserStated
     , isFromQS
     , trProperty
@@ -66,9 +67,19 @@ instance Show Literal where
 data Origin eq
     = Equation eq
     -- ^ A QuickSpec equation
+    | OldQuickSpec
+    -- ^ A QS equation from a previous round
     | UserStated
     -- ^ User-stated property
   deriving (Eq,Ord,Functor)
+
+forgetQSEquation :: Property eq -> Property Void
+forgetQSEquation prop = prop
+    { prop_origin = case prop_origin prop of
+        Equation{}   -> OldQuickSpec
+        OldQuickSpec -> OldQuickSpec
+        UserStated   -> UserStated
+    }
 
 -- | Properties
 data Property eq = Property
@@ -97,14 +108,13 @@ isUserStated p = case prop_origin p of
     _          -> False
 
 isFromQS :: Property eq -> Bool
-isFromQS p = case prop_origin p of
-    Equation{} -> True
-    _          -> False
+isFromQS = not . isUserStated
 
 instance Show (Origin eq) where
     show o = case o of
-        Equation{} -> "equation from QuickSpec"
-        UserStated -> "user stated"
+        Equation{}   -> "live equation from QuickSpec"
+        OldQuickSpec -> "equation from QuickSpec"
+        UserStated   -> "user stated"
 
 instance Show (Property eq) where
     show Property{..} = concatMap (++ "\n    ")

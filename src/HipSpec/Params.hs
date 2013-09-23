@@ -41,6 +41,7 @@ data DebugFlag
     | PrintAutoSig
     | DebugAutoSig
     | DebugStrConv
+    | DebugSigs
     | PrintEqClasses
     | TranslateOnly
     | QuickSpecOnly
@@ -65,6 +66,7 @@ debugDesc flg = case flg of
     PrintAutoSig     -> "Print generated signature"
     DebugAutoSig     -> "Print information about generated signature"
     DebugStrConv     -> "Print string conversions in signature"
+    DebugSigs        -> "Print information about multi-sigs"
     PrintEqClasses   -> "Print initial equivalence classes from QuickSpec"
     TranslateOnly    -> "Stop after translating"
     QuickSpecOnly    -> "Stop after QuickSpec"

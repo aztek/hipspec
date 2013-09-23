@@ -35,7 +35,7 @@ import System.FilePath
 
 import Text.Show.Pretty
 
-processFile :: (Maybe SigInfo -> [Property Void] -> HS a) -> IO a
+processFile :: ([SigInfo] -> [Property Void] -> HS a) -> IO a
 processFile cont = do
 
     params@Params{..} <- fmap sanitizeParams (cmdArgs defParams)
@@ -115,5 +115,5 @@ processFile cont = do
 
         when (TranslateOnly `elem` debug_flags) (liftIO exitSuccess)
 
-        cont sig_info tr_props
+        cont sig_infos tr_props
 

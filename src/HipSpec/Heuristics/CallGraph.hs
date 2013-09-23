@@ -8,6 +8,7 @@ import HipSpec.GHC.Calls
 import HipSpec.Sig.Resolve
 
 import HipSpec.GHC.Utils
+import HipSpec.Utils
 
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -47,9 +48,6 @@ sortByGraph cg syms eqs = flattenSCCs sccs
 
     sccs :: [SCC [a]]
     sccs = stronglyConnComp graph
-
-isSupersetOf :: Eq a => [a] -> [a] -> Bool
-as `isSupersetOf` bs = all (`elem` as) bs
 
 -- | Calculate the call graph for the QuickSpec string marshallings
 transitiveCallGraph :: ResolveMap -> Map Symbol [Symbol]

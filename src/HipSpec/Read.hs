@@ -13,8 +13,10 @@ import HipSpec.Sig.Resolve
 import HipSpec.Sig.Make
 import HipSpec.Sig.Get
 import HipSpec.Sig.Symbols
+import HipSpec.Sig.Scope
 
 import HipSpec.Params
+import HipSpec.Utils
 
 import CoreSyn (flattenBinds)
 import CoreMonad (liftIO)
@@ -30,8 +32,6 @@ import Var
 import HipSpec.GHC.Unfoldings
 import HipSpec.GHC.Utils
 
-import HipSpec.Sig.Scope
-
 import qualified Data.Map as M
 
 import Data.Maybe
@@ -43,7 +43,7 @@ import Control.Monad
 
 -- | The result from calling GHC
 data EntryResult = EntryResult
-    { sig_info  :: Maybe SigInfo
+    { sig_infos :: [SigInfo]
     , prop_ids  :: [Var]
     , extra_tcs :: [TyCon]
     }
@@ -124,36 +124,36 @@ execute params@Params{..} = do
                 , null only || varToString i `elem` only'
                 ]
 
-        -- Make or get signature
-        m_sig <- if auto
-            then makeSignature params props
-            else getSignature
+        -- Get and make signatures
+        m_file_sig <- getSignature
+
+        auto_sigs <- makeSignatures params props
 
         -- Make signature map
         --
         -- The extra_ids comes from --extra and --extra-trans fields from
         -- the auto signature generation
-        (sig_info,extra_ids,extra_tcs) <- case m_sig of
-            Nothing -> return (Nothing,[],[])
-            Just sig -> do
-                resolve_map <- makeResolveMap params sig
-                let symbol_map = makeSymbolMap resolve_map sig
-                    (ids,tcs) = case resolve_map of
-                        ResolveMap m n -> (M.elems m,M.elems n)
+        sig_infos_ids_tcs <- forM (maybeToList m_file_sig ++ auto_sigs) $ \ sig -> do
+            resolve_map <- makeResolveMap params sig
+            let symbol_map = makeSymbolMap resolve_map sig
+                (ids,tcs) = case resolve_map of
+                    ResolveMap m n -> (M.elems m,M.elems n)
 
-                whenFlag params DebugStrConv (liftIO (putStrLn (show symbol_map)))
+            whenFlag params DebugStrConv (liftIO (putStrLn (show symbol_map)))
 
-                return (Just SigInfo{..},ids,tcs)
+            return (SigInfo{..},(ids,tcs))
+
+        let (sig_infos,ids_tcs) = unzip sig_infos_ids_tcs
+            (extra_ids,tcs)     = (concat *** concat) (unzip ids_tcs)
 
         let toplvl_binds | tr_mod    = map (fix_id . fst) (flattenBinds binds)
                          | otherwise = []
 
-
         -- Wrapping up
         return EntryResult
-            { sig_info  = sig_info
+            { sig_infos = sig_infos
             , prop_ids  = props ++ extra_ids ++ toplvl_binds
-            , extra_tcs = extra_tcs
+            , extra_tcs = tcs
             }
 
 findModuleSum :: FilePath -> [ModSummary] -> ModSummary

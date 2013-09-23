@@ -50,73 +50,104 @@ import qualified Data.ByteString.Lazy as B
 
 import System.Exit (exitSuccess,exitFailure)
 
+type TheorySt' a = ([Property a],[Theorem a])
+type TheorySt    = TheorySt' Void
+
+startLoop :: [SigInfo] -> TheorySt -> HS (HS Void)
+startLoop sis st = do
+
+    Params{user_stated_first} <- getParams
+
+    st' <- if user_stated_first && not (null sis)
+        then fst <$> runMainLoop NoCC st
+        else return st
+
+    sigLoop sis st'
+
+showProperties :: [Property eq] -> [(String, Maybe String)]
+showProperties ps = [ (prop_name p,maybePropRepr p) | p <- ps ]
+
+sigLoop :: [SigInfo] -> TheorySt -> HS (HS Void)
+sigLoop (si:sis) st = sigLoop sis =<< handleSig si st
+sigLoop []       st = do
+    ((conjectures,theorems),_) <- runMainLoop NoCC st
+
+    let theorems' = map thm_prop
+                  . filter (\ t -> not (definitionalTheorem t) || isUserStated (thm_prop t))
+                  $ theorems
+        notQS  = filter (not . isFromQS)
+        fromQS = filter isFromQS
+
+    writeMsg Finished
+        { proved      = showProperties $ notQS theorems'
+        , unproved    = showProperties $ notQS conjectures
+        , qs_proved   = showProperties $ fromQS theorems'
+        }
+
+    Params{success,file} <- getParams
+
+    return $ liftIO $ case success of
+        NothingUnproved -> do
+            putStr (file ++ ", " ++ show success ++ ":")
+            if null conjectures
+                then putStrLn "ok" >> exitSuccess
+                else putStrLn "fail" >> exitFailure
+        ProvesUserStated -> do
+            putStr (show success ++ ":")
+            if null (notQS conjectures)
+                then putStrLn "ok" >> exitSuccess
+                else putStrLn "fail" >> exitFailure
+        CleanRun -> exitSuccess
+
+handleSig :: SigInfo -> TheorySt -> HS TheorySt
+handleSig sig_info@SigInfo{..} (props,thms) = do
+    (eqs,reps,classes) <- runQuickSpec sig_info
+
+    Params{explore_theory,user_stated_first} <- getParams
+
+    let (~+) | user_stated_first = flip (++)
+             | otherwise         = (++)
+
+    let qsconjs = map (etaExpandProp . generaliseProp . eqToProp sig_info)
+                      (map (some eraseEquation) eqs)
+
+    mapM_ (checkLint . lintProperty) qsconjs
+
+    debugWhen PrintProps $ "\nQuickSpec Properties:\n" ++
+        unlines (map show qsconjs)
+
+    let ctx_init = NER.initial (maxDepth sig) (symbols sig) reps
+
+    Env{theory} <- getEnv
+
+    let def_eqs = definitions theory symbol_map
+
+        ctx_with_def = execEQR ctx_init (mapM_ unify def_eqs)
+
+    debugWhen PrintDefinitions $ "\nDefinitions as QuickSpec Equations:\n" ++
+        unlines (map show def_eqs)
+
+    (st',ctx_final) <- runMainLoop ctx_with_def
+                                   ( qsconjs ~+ map vacuous props
+                                   , map vacuous thms
+                                   )
+
+    when explore_theory $ do
+        let pruner   = prune ctx_init (map erase reps) id
+            provable = evalEQR ctx_final . equal
+            explored_theory
+                = filter (not . evalEQR ctx_with_def . equal)
+                $ pruner $ filter provable
+                $ map (some eraseEquation) (equations classes)
+        writeMsg $ ExploredTheory $ map (showEquation sig) explored_theory
+
+    return st'
+
 main :: IO ()
-main = processFile $ \ m_sig_info user_props -> do
+main = processFile $ \ sig_infos user_props -> do
     writeMsg FileProcessed
 
-    exit_act <- case m_sig_info of
-
-        Nothing -> snd <$> runMainLoop NoCC user_props []
-
-        Just (sig_info@SigInfo{..}) -> do
-
-            (eqs,reps,classes) <- runQuickSpec sig_info
-
-            Params{explore_theory,user_stated_first} <- getParams
-
-            let (~+) | user_stated_first = flip (++)
-                     | otherwise         = (++)
-
-{-
-            if bottoms then do
-
-                let qsconjs = map (some (peqToProp sig_info)) eqs
-
-                (ctx_init,tot_thms,tot_conjs) <- proveTotality sig_info reps
-
-                ctx_with_def <- pruneWithDefEqs sig_info ctx_init
-
-                void $ runMainLoop
-                        ctx_with_def
-                        (qsconjs ~+ map vacuous user_props ++ map vacuous tot_conjs)
-                        (map vacuous tot_thms)
-
-            else do
-                        -}
-
-            let qsconjs = map (etaExpandProp . generaliseProp . eqToProp sig_info)
-                              (map (some eraseEquation) eqs)
-
-            mapM_ (checkLint . lintProperty) qsconjs
-
-            debugWhen PrintProps $ "\nQuickSpec Properties:\n" ++
-                unlines (map show qsconjs)
-
-            let ctx_init = NER.initial (maxDepth sig) (symbols sig) reps
-
-            Env{theory} <- getEnv
-
-            let def_eqs = definitions theory symbol_map
-
-                ctx_with_def = execEQR ctx_init (mapM_ unify def_eqs)
-
-            debugWhen PrintDefinitions $ "\nDefinitions as QuickSpec Equations:\n" ++
-                unlines (map show def_eqs)
-
-            (ctx_final,exit_act) <- runMainLoop ctx_with_def
-                                     (qsconjs ~+ map vacuous user_props)
-                                     []
-
-            when explore_theory $ do
-                let pruner   = prune ctx_init (map erase reps) id
-                    provable = evalEQR ctx_final . equal
-                    explored_theory
-                        = filter (not . evalEQR ctx_with_def . equal)
-                        $ pruner $ filter provable
-                        $ map (some eraseEquation) (equations classes)
-                writeMsg $ ExploredTheory $ map (showEquation sig) explored_theory
-
-            return exit_act
+    exit_act <- startLoop sig_infos (user_props,[])
 
 #ifdef SUPPORT_JSON
     Params{json} <- getParams
@@ -130,44 +161,19 @@ main = processFile $ \ m_sig_info user_props -> do
 
     vacuous exit_act
 
-runMainLoop :: EQR eq ctx cc => ctx -> [Property eq] -> [Theorem eq] -> HS (ctx,HS Void)
-runMainLoop ctx_init initial_props initial_thms = do
+runMainLoop :: EQR eq ctx cc => ctx -> TheorySt' eq -> HS (TheorySt,ctx)
+runMainLoop ctx_init (initial_props,initial_thms) = do
 
-    params@Params{only_user_stated,success,file} <- getParams
-
-    whenFlag params QuickSpecOnly (liftIO exitSuccess)
+    Params{only_user_stated} <- getParams
 
     (theorems,conjectures,ctx_final) <- mainLoop ctx_init initial_props initial_thms
 
-    let showProperties ps = [ (prop_name p,maybePropRepr p) | p <- ps ]
-        theorems' = map thm_prop
-                  . filter (\ t -> not (definitionalTheorem t) || isUserStated (thm_prop t))
-                  $ theorems
-        notQS  = filter (not . isFromQS)
-        fromQS = filter isFromQS
+    writeMsg $ Unproved (showProperties (filter (\ c -> not (only_user_stated && isFromQS c)) conjectures))
 
-    writeMsg Finished
-        { proved      = showProperties $ notQS theorems'
-        , unproved    = showProperties $ notQS conjectures
-        , qs_proved   = showProperties $ fromQS theorems'
-        , qs_unproved =
-            if only_user_stated then [] else showProperties $ fromQS conjectures
-        }
+    let conjectures' = map forgetQSEquation $ filter isUserStated conjectures
+                                                -- forgets qs properties between rounds
 
-    let exit_act = liftIO $ case success of
-            NothingUnproved -> do
-                putStr (file ++ ", " ++ show success ++ ":")
-                if null conjectures
-                    then putStrLn "ok" >> exitSuccess
-                    else putStrLn "fail" >> exitFailure
-            ProvesUserStated -> do
-                putStr (show success ++ ":")
-                if null (notQS conjectures)
-                    then putStrLn "ok" >> exitSuccess
-                    else putStrLn "fail" >> exitFailure
-            CleanRun -> exitSuccess
-
-    return (ctx_final,exit_act)
+    return ((conjectures',map forgetQSTheorem theorems),ctx_final)
 
 runQuickSpec :: SigInfo -> HS ([Some TypedEquation],[Tagged Term],[Several Expr])
 runQuickSpec SigInfo{..} = do

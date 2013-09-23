@@ -12,6 +12,7 @@ module HipSpec.Utils
     , ifM
 
     -- * Monadic concatenative combinators
+    , mapMaybeM
     , concatMapM
     , concatFoldM
 
@@ -29,6 +30,7 @@ module HipSpec.Utils
 
     -- * Intersection
     , intersects
+    , isSupersetOf
 
     ) where
 
@@ -37,6 +39,7 @@ import Control.Applicative ((<$>),(<*>),Applicative)
 
 import Control.Monad (liftM)
 
+import Data.Maybe
 import Data.List
 import Data.Function (on)
 import Data.Ord      (comparing)
@@ -48,6 +51,10 @@ infixr 9 .:
 --   @(f .: g) = \x y -> f (g x y)@
 (.:) :: (b -> c) -> (a -> a' -> b) -> a -> a' -> c
 (.:) = (.) . (.)
+
+-- | Concatenate the results after mapM
+mapMaybeM :: Monad m => (a -> m (Maybe b)) -> [a] -> m [b]
+mapMaybeM f = liftM catMaybes . mapM f
 
 -- | Concatenate the results after mapM
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
@@ -117,4 +124,7 @@ nubSortedOn f = map head . groupSortedOn f
 -- | Do these two lists have a non-empty intersection?
 intersects :: Eq a => [a] -> [a] -> Bool
 intersects = (not . null) .: intersect
+
+isSupersetOf :: Eq a => [a] -> [a] -> Bool
+as `isSupersetOf` bs = all (`elem` as) bs
 

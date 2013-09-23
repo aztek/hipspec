@@ -1,5 +1,5 @@
 {-# LANGUAGE RecordWildCards,PatternGuards,ScopedTypeVariables,ViewPatterns,CPP #-}
-module HipSpec.Sig.Make (makeSignature) where
+module HipSpec.Sig.Make (makeSignature,makeSignatures) where
 
 import Data.List.Split (splitOn)
 
@@ -35,8 +35,23 @@ import Outputable
 
 -}
 
+
 makeSignature :: Params -> [Var] -> Ghc (Maybe Sig)
-makeSignature p@Params{..} prop_ids = do
+makeSignature p = makeSigFrom p <=< followIdentifiers p
+
+makeSignatures :: Params -> [Var] -> Ghc [Sig]
+makeSignatures p props = do
+    sets <- nubBy (flip isSupersetOf) <$> (forM props $ \ i -> do
+        is <- followIdentifiers p [i]
+        whenFlag p DebugSigs $ liftIO $ putStrLn (varToString i ++ "->" ++ unwords (map varToString is))
+        return is)
+
+    whenFlag p DebugSigs $ liftIO $ forM_ sets $ \ set -> putStrLn (unwords (map varToString set))
+
+    mapMaybeM (makeSigFrom p) sets
+
+followIdentifiers :: Params -> [Var] -> Ghc [Var]
+followIdentifiers p@Params{..} start_ids = do
 
     let extra' = concatMap (splitOn ",") extra
         extra_trans' = concatMap (splitOn ",") extra_trans
@@ -47,7 +62,7 @@ makeSignature p@Params{..} prop_ids = do
 
         trans_ids :: VarSet
         trans_ids = unionVarSets $
-            map (transCalls With) (prop_ids ++ extra_trans_ids)
+            map (transCalls With) (start_ids ++ extra_trans_ids)
 
     extra_things <- concatMapM lookupString extra'
 
@@ -75,7 +90,7 @@ makeSignature p@Params{..} prop_ids = do
         OUT(ids_in_scope)
 #undef OUT
 
-    makeSigFrom p ids_in_scope =<< getA
+    return ids_in_scope
 
 getA :: Ghc (Maybe Type)
 getA = do
@@ -87,8 +102,10 @@ getA = do
         | ATyCon tc <- a_things
         ]
 
-makeSigFrom :: Params -> [Var] -> Maybe Type -> Ghc (Maybe Sig)
-makeSigFrom p@Params{..} ids m_a_ty = do
+makeSigFrom :: Params -> [Var] -> Ghc (Maybe Sig)
+makeSigFrom p@Params{..} ids = do
+
+    m_a_ty <- getA
 
     let a_ty = case m_a_ty of
             Just ty -> ty

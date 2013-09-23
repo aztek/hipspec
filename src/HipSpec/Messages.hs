@@ -57,11 +57,11 @@ data Msg
     | Generated String String
 
     | ExploredTheory [String]
+    | Unproved [(String,Maybe String)]
     | Finished
         { proved      :: [(String,Maybe String)]
         , unproved    :: [(String,Maybe String)]
         , qs_proved   :: [(String,Maybe String)]
-        , qs_unproved :: [(String,Maybe String)]
         }
   deriving (Eq,Ord,Show,Generic)
 
@@ -111,10 +111,10 @@ showMsg Params{no_colour,reverse_video} msg = case msg of
     Generated c t             -> "Generated theory for " ++ c ++ ":\n" ++ reindent t
 
     ExploredTheory eqs -> "Explored theory (proven correct):\n" ++ numberedEqs eqs
+    Unproved eqs  -> if null eqs then "" else "Unproved:\n" ++ indent (map repr_prop eqs)
     Finished{..} ->
         "Proved:\n" ++ indent (map repr_prop (qs_proved ++ proved)) ++
-        if null unproved' then "" else "Unproved:\n" ++ indent unproved'
-      where unproved' = map repr_prop (qs_unproved ++ unproved)
+        if null unproved then "" else "Unproved:\n" ++ indent (map repr_prop unproved)
 
   where
     repr_prop :: (String,Maybe String) -> String
@@ -152,6 +152,7 @@ msgVerbosity m = case m of
     ExploredTheory{}         -> 0  -- enabled by a flag
     Finished{}               -> 1  -- most interesting
     UnknownResult{}          -> 10 -- a warning, really
+    Unproved{}               -> 15
     InductiveProof{vars=_:_} -> 20
     InductiveProof{vars=[]}  -> 30
     FailedProof{}            -> 40
