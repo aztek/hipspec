@@ -104,6 +104,9 @@ rtsExpr e0 = case e0 of
 
                 f' <- fresh new_type
 
+                -- TODO: Change to substLcl instead of tySubst... The
+                --  variable should be replaced with a Gbl instead of Lcl
+                --  too
                 let subst = tySubst fn $ \ ty_args ->
                         R.Var f' (map (star . TyVar) new_ty_vars ++ ty_args)
                         `R.apply`

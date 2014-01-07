@@ -19,9 +19,8 @@ ppFun t p (Function f ty e) = ppId f ty <+> "=" $\ ppExpr 0 t p e
 
 ppExpr :: Int -> Types -> P a -> Expr a -> Doc
 ppExpr i t p e0 = case e0 of
-    Lcl x ty    -> ppId x ty
-    Gbl x ty ts -> parensIf (not (null ts) && i > 1) $
-        ppPolyId x ty $\ sep [ "@" <+> ppType 1 p t' | t' <- ts ]
+    Lcl x ty ts -> ppVar x ty ts
+    Gbl x ty ts -> "#" <> ppVar x ty ts
     App{} -> parensIf (i > 1) $
         let (fun,args) = collectArgs e0
             pp_args    = map (ppExpr 2 t p) args
@@ -43,6 +42,9 @@ ppExpr i t p e0 = case e0 of
   where
     ppId     x ty = ppTyped t (p x) (ppType 0 p ty)
     ppPolyId x ty = ppTyped t (p x) (ppPolyType p ty)
+    ppVar x ty ts = parensIf (not (null ts) && i > 1) $
+        ppPolyId x ty $\ sep [ "@" <+> ppType 1 p t' | t' <- ts ]
+
 
 ppAlt :: Types -> P a -> Alt a -> Doc
 ppAlt t p (pat,rhs) = ppPat t p pat <+> "->" $\ ppExpr 0 t p rhs

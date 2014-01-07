@@ -48,9 +48,9 @@ mapFnBody f fn = fn { fn_body = f (fn_body fn) }
 
 -- | "Rich" expressions, includes lambda, let and case
 data Expr a
-    = Lcl a (Type a)
-    -- ^ Local variables
-    --   For now, we don't support polymorphic lets. :(
+    = Lcl a (PolyType a) [Type a]
+    -- ^ Local variables, applied to their type arguments
+    --   (only happens with local lets)
     | Gbl a (PolyType a) [Type a]
     -- ^ Global variables applied to their type arguments
     | App (Expr a) (Expr a)
@@ -80,7 +80,7 @@ univExpr = $(genUniverseBi 'univExpr)
 
 exprType :: Eq a => Expr a -> Type a
 exprType e0 = case e0 of
-    Lcl _ t                -> t
+    Lcl _ (Forall xs t) ts -> substManyTys (zip xs ts) t
     Gbl _ (Forall xs t) ts -> substManyTys (zip xs ts) t
     App e _                -> arrowResult "Rich.exprType" (exprType e)
     Lit{}                  -> Integer
@@ -110,7 +110,7 @@ data Pattern a
 -- | Free (local) variables
 freeVars :: Eq a => Expr a -> [a]
 freeVars e = nub
-    $ ([ a | Lcl a _ <- univ ] \\)
+    $ ([ a | Lcl a _ _ <- univ ] \\)
     $ [ a | Lam a _ _  <- univ ] ++
       [ a | Case _ (Just (a,_)) _ <- univ ] ++
       [ a | Case _ _ alts <- univ, (ConPat _ _ _ as,_) <- alts, (a,_) <- as ] ++
@@ -123,7 +123,7 @@ letFree e = or [ True | Let{} <- univExpr e ]
 
 -- | Number of occurences for a (local) variable
 occurrences :: Eq a => a -> Expr a -> Int
-occurrences x e = length [ () | Lcl y _ <- univExpr e, x == y ]
+occurrences x e = length [ () | Lcl y _ _ <- univExpr e, x == y ]
 
 -- | Does this variable occur in this expression?
 --   Used to see if a function is recursive
@@ -133,26 +133,22 @@ occursIn x e = x `elem` freeVars e
 transformExpr :: (Expr a -> Expr a) -> Expr a -> Expr a
 transformExpr = $(genTransformBi 'transformExpr)
 
--- | Substitution, of local variables
---
--- Since there are only have rank-1 types, bound variables from lambdas and
--- case never have an forall type and thus are not applied to any types.
-(//) :: Eq a => Expr a -> a -> Expr a -> Expr a
-e // x = transformExpr $ \ e0 -> case e0 of
-    Lcl y _ | x == y -> e
-    _                -> e0
+-- | Substitution, of local polymorphic variables
+substLcl :: Eq a => a -> ([Type a] -> Expr a) -> Expr a -> Expr a
+substLcl x k = transformExpr $ \ e0 -> case e0 of
+    Lcl y _ ts | x == y -> k ts
+    _                   -> e0
 
+-- | Substitution, of local simply-typed variables. Throws an error on
+--   polymorphism!
+(//) :: Eq a => Expr a -> a -> Expr a -> Expr a
+e // x = substLcl x $ \ ts -> case ts of
+    [] -> e
+    _  -> error "HipSpec.Lang.Rich: local variable not simply-typed. Please report this as a bug!"
+
+--  | Substitution of many simply-typed local variables
 substMany :: Eq a => [(a,Expr a)] -> Expr a -> Expr a
 substMany xs e0 = foldr (\ (u,e) -> (e // u)) e0 xs
-
--- | Substitution, of global variables (that can be applied to types)
---
--- Let-bound variables and top-level variables can have a forall-type.
--- Use this function to substitute such variables.
-tySubst :: Eq a => a -> ([Type a] -> Expr a) -> Expr a -> Expr a
-tySubst x k = transformExpr $ \ e0 -> case e0 of
-    Gbl y _ tys | x == y -> k tys
-    _                    -> e0
 
 apply :: Expr a -> [Expr a] -> Expr a
 apply = foldl App

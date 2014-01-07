@@ -123,7 +123,7 @@ injectBody b0 = case b0 of
 
 injectExpr :: Expr a -> R.Expr a
 injectExpr e0 = case e0 of
-    Lcl x t    -> R.Lcl x t
+    Lcl x t    -> R.Lcl x (Forall [] t) []
     Gbl x t ts -> R.Gbl x t ts
     App e1 e2  -> R.App (injectExpr e1) (injectExpr e2)
     Lit l      -> R.Lit l
