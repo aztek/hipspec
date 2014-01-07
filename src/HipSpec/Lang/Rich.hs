@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, TemplateHaskell #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, TemplateHaskell, PatternGuards #-}
 -- | The Rich expression language, a subset of GHC Core
 --
 -- It is Rich because it has lambdas, let and cases at any level.
@@ -8,6 +8,7 @@ import Data.Generics.Geniplate
 import Data.List (union)
 import Data.Foldable (Foldable)
 import Data.Traversable (Traversable)
+import qualified Data.Foldable as F
 
 import HipSpec.Lang.Type
 
@@ -41,6 +42,9 @@ data Function a = Function
     , fn_body    :: Expr a
     }
   deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
+
+recursive :: Eq a => Function a -> Bool
+recursive (Function f b) = f `F.elem` b
 
 mapFnBody :: (Expr a -> Expr a) -> Function a -> Function a
 mapFnBody f fn = fn { fn_body = f (fn_body fn) }
@@ -94,6 +98,7 @@ data Pattern a
         }
     | LitPat Integer a
   deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
+
 
 freeVars :: Eq a => Expr a -> [a]
 freeVars = go
@@ -151,6 +156,12 @@ occursIn x e = x `elem` freeVars e
 transformExpr :: (Expr a -> Expr a) -> Expr a -> Expr a
 transformExpr = $(genTransformBi 'transformExpr)
 
+transformExprType :: (Type a -> Type a) -> Expr (Typed a) -> Expr (Typed a)
+transformExprType = $(genTransformBi 'transformExprType)
+
+universeExpr :: Expr a -> [Expr a]
+universeExpr = $(genUniverseBi 'universeExpr)
+
 -- | Substitution, of simple variables (not applied to any types)
 --
 -- Since there are only have rank-1 types, bound variables from lambdas and
@@ -171,6 +182,11 @@ tySubst :: Eq a => a -> ([Type a] -> Expr a) -> Expr a -> Expr a
 tySubst x k = transformExpr $ \ e0 -> case e0 of
     Var y tvs | x == y -> k tvs
     _ -> e0
+
+tyVarSubsts :: Eq a => [(a,Type a)] -> Expr (Typed a) -> Expr (Typed a)
+tyVarSubsts su = transformExprType $ \ t0 -> case t0 of
+    TyVar x | Just t <- lookup x su -> t
+    _                               -> t0
 
 apply :: Expr a -> [Expr a] -> Expr a
 apply = foldl App

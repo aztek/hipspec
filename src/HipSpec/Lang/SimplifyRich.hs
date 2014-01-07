@@ -18,16 +18,69 @@ module HipSpec.Lang.SimplifyRich where
 import HipSpec.Lang.Rich
 import HipSpec.Lang.Type
 
+import qualified Data.Foldable as F
+
+import HipSpec.Utils (inspect)
+import Data.Maybe (mapMaybe)
+
+-- GHC too often separates functions that are not supposed to be.
+-- If we identify a function that is not recursive, and calls a function
+-- no other function calls, it has probably been floated out in a silly way
+-- and is let bound back in. The reason we do is is to kick in the
+-- optimisation in simpFun.
+--
+-- More inlining can be done: non-recursive functions can always be
+-- inlined. But this could be done at the simple level instead so no
+-- new cases or lets or lambdas are inlined.
+--
+-- The new name needs to be brought in by the compiler, and not from the
+-- source, otherwise QuickSpec might want to use it later. Hence the
+-- eliglibility check.
+simpFuns :: Eq a => (Typed a -> Bool) -> [Function (Typed a)] -> [Function (Typed a)]
+simpFuns eliglible fns = case mapMaybe (uncurry try) (inspect fns) of
+    ((g,f),rest):_ ->
+        let (g',f') = makeLet g f
+        in  simpFun g' : simpFuns eliglible (f' : rest)
+    [] -> map simpFun fns
+  where
+    -- Is this function called from only one other function?
+    try fn@(Function f _) other_fns
+        | not (eliglible f) = Nothing
+        | otherwise = case calls of
+            [(other_fn,rest)] | not (recursive other_fn) -> Just ((fn,other_fn),rest) -- put fst int snd
+            _                                            -> Nothing
+      where
+        calls = [ pair | pair@(Function _ b,_) <- inspect other_fns , f `F.elem` b ]
+
+-- Put the first, g, into the second, f
+makeLet :: Function (Typed a) -> Function (Typed a) -> (Function (Typed a),Function (Typed a))
+makeLet gf (Function f fb) =
+    ( gf -- Function g (Var f [])
+    , Function f (Let [gf] fb)
+    )
+
 simpFun :: Eq a => Function (Typed a) -> Function (Typed a)
 simpFun (Function f b) = Function f $ simpExpr $ case b of
     -- Sometimes functions look like this
-    -- f = \ xs -> let g = K[g] in g,
-    -- then we simply replace it to f = \ xs -> K[f xs]
-    -- TODO: Polymorphic functions (find examples!)
-    (collectBinders -> (xs,Let [Function g e] (Var g' [])))
-        | not (isForallTy (typed_type g))
-        , g == g' -> makeLambda xs ((Var f ts `apply` map (`Var` []) xs // g) e)
-      where ts = map (star . TyVar) . fst . collectForalls . typed_type $ f
+    --    f = /\ fts -> \ xs -> let g = /\ gts -> K[g @gts] in g @ts,
+    -- then, if ts only type variables and a subset of tsf and the gts are
+    -- the same at every ocurence, we simply replace it to
+    --    f = /\ fts -> \ xs -> K[f @fts xs]
+    (collectBinders -> (xs,Let [Function g e] (Var g' ts)))
+        | flip all ts $ \ t -> case t of TyVar (u ::: _) -> u `elem` fts
+                                         _       -> False
+        , all (check ==) checks -- all type applications of g are the same
+        , and [ ty `elem` gtst | ty <- check ]  -- all type applications of g are of its type variables
+        , g == g' -> makeLambda xs
+                    $ tySubst g (\ _ -> Var f ftst `apply` map (`Var` []) xs)
+                    $ tyVarSubsts ty_su e
+      where
+        ty_su = zip gts (map forget ts)
+        ftst  = map (star . TyVar) fts
+        fts   = fst . collectForalls . typed_type $ f
+        gtst  = map (star . TyVar) gts
+        gts   = fst . collectForalls . typed_type $ g
+        check:checks = [ ts' | Var g'' ts' <- universeExpr e, g == g'' ]
     _ -> b
 
 simpExpr :: Eq a => Expr (Typed a) -> Expr (Typed a)
