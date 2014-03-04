@@ -2,7 +2,10 @@
 module HipSpec.Pretty where
 
 import Text.PrettyPrint
-import HipSpec.Lang.PrettyAltErgo
+import HipSpec.Lang.PrettyAltErgo as AltErgo
+import HipSpec.Lang.PrettyPolyFOL as TFF
+
+import Data.Char
 
 import HipSpec.Utils.ZEncode
 
@@ -55,10 +58,15 @@ polyname x0 = case x0 of
     QVar i   -> 'x':show i
 
 ppAltErgo :: [Clause LogicId] -> String
-ppAltErgo = render . vcat . map (ppClause text) . renameCls
+ppAltErgo = render . vcat . map (AltErgo.ppClause text) . renameCls
+
+ppTFF :: [Clause LogicId] -> String
+ppTFF = render . vcat . map (TFF.ppClause pp) . renameCls
+  where
+    pp = TFF.PP { ppVar = text . ('X':), ppSymb = text . ('x':) }
 
 renameCls :: [Clause LogicId] -> [Clause String]
-renameCls = runRenameM (zencode . polyname) altErgoKeywords . mapM rename
+renameCls = runRenameM (map toLower {- for tff -} . zencode . polyname) altErgoKeywords . mapM rename
 
 altErgoKeywords :: [String]
 altErgoKeywords =
